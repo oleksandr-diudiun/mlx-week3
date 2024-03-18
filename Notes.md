@@ -38,4 +38,26 @@ Create triples of (q_i p_ij n_ij)
 
 ### Precompute Embeddings
 
-Use mapping functions
+Use mapping functions 
+
+
+
+DatasetDict({
+    validation: Dataset({
+        features: ['answers', 'passages', 'query', 'query_id', 'query_type', 'wellFormedAnswers'],
+        num_rows: 10047
+    })
+    train: Dataset({
+        features: ['answers', 'passages', 'query', 'query_id', 'query_type', 'wellFormedAnswers'],
+        num_rows: 82326
+    })
+    test: Dataset({
+        features: ['answers', 'passages', 'query', 'query_id', 'query_type', 'wellFormedAnswers'],
+        num_rows: 9650
+    })
+})
+
+Share random state
+
+
+Share code from last week (training loop)
