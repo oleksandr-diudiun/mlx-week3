@@ -1,3 +1,5 @@
 .trunkword2vec.model
 indices.plk
 .DS_Store
+utils/__pycache__/.*py[cod]
+*.pyc
