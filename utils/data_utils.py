@@ -1,10 +1,15 @@
-import hashlib
-import numpy as np
-from concurrent.futures import ProcessPoolExecutor, as_completed
+"""
+Bunch of utilities to help create the triplets with negative sampling
+"""
+
 from functools import partial
+import hashlib
+from collections import namedtuple
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from collections import namedtuple
+import torch
 
 
 def create_lookups(dataset):
@@ -119,7 +124,7 @@ def add_negative_samples(dataset, ids_to_urls, is_deterministic=False):
 
 
 Triple = namedtuple(
-    "triple",
+    "Triple",
     [
         "query_id",
         "query_embedding",
@@ -136,7 +141,18 @@ def triples_to_embeddings(
     w2v_model,
     embedding_size=128,
 ):
-    # triples_df = dataset[triple_columns]
+    """
+    Make a doc string
+    triples_df: pd.DataFrame with 4 columns: query_id: int, query: str, hashed_urls: list of md5, negative_sample_urls: list of md5
+    url_to_doctext_mapping: dict of {md5: passage_text}
+    sentence_piece_model: sentencepiece.SentencePieceProcessor
+    w2v_model: gensim.models.word2vec.Word2Vec
+    embedding_size: int
+
+    Returns
+    -------
+    list of Triple
+    """
     triples = []
 
     for row in tqdm(triples_df.iterrows(), total=triples_df.shape[0]):
@@ -151,7 +167,6 @@ def triples_to_embeddings(
                 to_embedding(
                     sentence_piece_model,
                     url_to_doctext_mapping[url_id],
-                    embedding_size,
                     w2v_model,
                 )
             )
@@ -159,12 +174,12 @@ def triples_to_embeddings(
                 to_embedding(
                     sentence_piece_model,
                     url_to_doctext_mapping[neg_url_id],
-                    embedding_size,
                     w2v_model,
                 )
             )
-        query_embedding = to_embedding(
-            sentence_piece_model, row[1]["query"], embedding_size, w2v_model
+        query_embedding = to_embedding(sentence_piece_model, row[1]["query"], w2v_model)
+        print(
+            f"There are {len(embedding_hashed_urls)} passages with {[len(i) for i in embedding_hashed_urls] } tokens"
         )
         triples.append(
             Triple(
@@ -177,15 +192,16 @@ def triples_to_embeddings(
     return triples
 
 
-def to_embedding(sp, text, vector_size, w2v_model):
+def to_embedding(sp, text, w2v_model):
     tokens = sp.encode_as_pieces(text)
 
     embeddings = []
     for token in tokens:
         if token in w2v_model.wv:
             embeddings.append(w2v_model.wv[token])
-
-    if embeddings:
-        return np.mean(embeddings, axis=0)
-    else:
-        return np.zeros(vector_size)
+    # TODO: I don't think this is right, need to read about RNN input first.
+    return embeddings
+    # if embeddings:
+    #     return np.mean(embeddings, axis=0)
+    # else:
+    #     return np.zeros(vector_size)
