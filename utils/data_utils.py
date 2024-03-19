@@ -4,15 +4,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 import pandas as pd
 from tqdm import tqdm
+from collections import namedtuple
 
-def create_lookups(full_dataset):
-    """
-    full_dataset: pandas dataframe from the parquet files.
-    Returns: urls_to_ids, ids_to_urls dictionaries for
-    fast negative sampling.
-    """
-    print(f"dataset shape: {full_dataset.shape}")
-    all_urls = full_dataset["passages"].apply(lambda x: x["url"]).tolist()
+
+def create_lookups(dataset):
+    print(f"dataset shape: {dataset.shape}")
+    all_urls = dataset["passages"].apply(lambda x: x["url"]).tolist()
+
     unique_urls = set([item for sublist in all_urls for item in sublist])
     print(f"Total number of urls: {sum(len(i) for i in all_urls)}")
     print(f"Total number of unique urls: {len(unique_urls)}")
@@ -26,51 +24,24 @@ def create_lookups(full_dataset):
     urls_to_ids = {url: i for i, url in ids_to_urls.items()}
     print(f"Total number of hashed urls: {len(ids_to_urls)}")
 
-    query_ids = full_dataset["query_id"].tolist()
+    url_to_doc_mapping = {}
+    for row in dataset[["passages"]].iterrows():
+        # assert len(url_list) == len(set(url_list))
+        passages = row[1]["passages"]
+        for url, passage_text in zip(passages["url"], passages["passage_text"]):
+            url_to_doc_mapping[urls_to_ids[url]] = passage_text
+
+    query_ids = dataset["query_id"].tolist()
     assert len(query_ids) == len(set(query_ids))
     print(f"Total number of queries: {len(query_ids)}")
-    return ids_to_urls, urls_to_ids
+    return (ids_to_urls, urls_to_ids, url_to_doc_mapping)
 
-
-# def create_triples(dataset, ids_to_urls, urls_to_ids, create_small=False):
-#     """
-#     Input: dataset: pandas dataframe from the parquet files
-#     ids_to_urls: dictionary of hashed urls to urls from create_lookups
-#     urls_to_ids: dictionary of urls to hashed urls from create_lookups
-
-#     returns: Triples for the torch Dataset
-#         [(query_hash_id, relevant_urls, irrelevant_urls))]
-
-#     The relevant_urls and irrelevant_urls are hashed urls.
-
-#     Query ID is from the query_id column in the parquet dataset.
-#     """
-#     triples = []
-#     master_url_id_set = np.array(list(set(ids_to_urls.keys())))
-#     for row in dataset.iterrows() if not create_small else dataset.head(10).iterrows():
-#         urls = row[1]["passages"]["url"]
-#         query_id = row[1]["query_id"]
-#         relevant_url_ids = np.array(list(set([urls_to_ids[url] for url in urls])))
-#         irrelevant_url_ids = np.setdiff1d(
-#             master_url_id_set, relevant_url_ids, assume_unique=True
-#         )
-#         sampled_ids = np.random.choice(
-#             irrelevant_url_ids, size=len(relevant_url_ids), replace=False
-#         )
-
-#         triple = (query_id, list(relevant_url_ids), sampled_ids)
-#         triples.append(triple)
-#     return triples
-    # NL = '\n'
-    # TAB = '\t'
-    # print(f"Query ID, Query: {query_id}, {row[1]['query']}")
-    # print(f"R {NL.join([ids_to_urls[i]+NL+TAB+str(i) for i in relevant_url_ids])}")
-    # print(f"IR: {NL.join([ids_to_urls[i]+NL+TAB+str(i) for i in irrelevant_url_ids])}")
 
 def add_hashed_urls(dataset, urls_to_ids):
     dataset.loc[:, "hashed_urls"] = dataset["passages"].progress_apply(
         lambda x: np.array(list(set([urls_to_ids[url] for url in x["url"]])))
     )
+
 
 # Function to be applied to each row, modified to accept master_url_id_set
 def process_row(x, master_url_id_set, is_deterministic=True):
@@ -145,3 +116,76 @@ def add_negative_samples(dataset, ids_to_urls, is_deterministic=False):
     )
     dataset.reset_index(drop=True, inplace=True)
     dataset["negative_sample_urls"] = results
+
+
+Triple = namedtuple(
+    "triple",
+    [
+        "query_id",
+        "query_embedding",
+        "relevant_doc_embedding",
+        "irrelevant_doc_embedding",
+    ],
+)
+
+
+def triples_to_embeddings(
+    triples_df,
+    url_to_doctext_mapping,
+    sentence_piece_model,
+    w2v_model,
+    embedding_size=128,
+):
+    # triples_df = dataset[triple_columns]
+    triples = []
+
+    for row in tqdm(triples_df.iterrows(), total=triples_df.shape[0]):
+        # print(len(row[1]["hashed_urls"].tolist()))
+        embedding_hashed_urls = []
+        embedding_negative_sample_urls = []
+        for url_id, neg_url_id in zip(
+            row[1]["hashed_urls"].tolist(), row[1]["negative_sample_urls"].tolist()
+        ):
+
+            embedding_hashed_urls.append(
+                to_embedding(
+                    sentence_piece_model,
+                    url_to_doctext_mapping[url_id],
+                    embedding_size,
+                    w2v_model,
+                )
+            )
+            embedding_negative_sample_urls.append(
+                to_embedding(
+                    sentence_piece_model,
+                    url_to_doctext_mapping[neg_url_id],
+                    embedding_size,
+                    w2v_model,
+                )
+            )
+        query_embedding = to_embedding(
+            sentence_piece_model, row[1]["query"], embedding_size, w2v_model
+        )
+        triples.append(
+            Triple(
+                row[1]["query_id"],
+                query_embedding,
+                embedding_hashed_urls,
+                embedding_negative_sample_urls,
+            )
+        )
+    return triples
+
+
+def to_embedding(sp, text, vector_size, w2v_model):
+    tokens = sp.encode_as_pieces(text)
+
+    embeddings = []
+    for token in tokens:
+        if token in w2v_model.wv:
+            embeddings.append(w2v_model.wv[token])
+
+    if embeddings:
+        return np.mean(embeddings, axis=0)
+    else:
+        return np.zeros(vector_size)
