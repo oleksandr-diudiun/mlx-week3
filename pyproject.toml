@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "mlx-week3"
+version = "0.1.0"
+description = ""
+authors = ["pp"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+jupyter = "^1.0.0"
+torch = "^2.2.1"
+matplotlib = "^3.8.3"
+pandas = "^2.2.1"
+pyarrow = "^15.0.2"
+fastparquet = "^2024.2.0"
+sentencepiece = "^0.2.0"
+tqdm = "^4.66.2"
+gensim = "^4.3.2"
+scikit-learn = "^1.4.1.post1"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.3"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
